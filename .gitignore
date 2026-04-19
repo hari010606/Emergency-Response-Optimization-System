@@ -1,0 +1,21 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.env
+
+# osmnx
+cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Node (for later, when we do the frontend)
+node_modules/
+dist/
+build/
