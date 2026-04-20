@@ -1,3 +1,6 @@
+from fastapi import WebSocket, WebSocketDisconnect
+import asyncio
+import json
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -39,6 +42,7 @@ app.add_middleware(
 print("Loading Chennai road network (one-time)...")
 G = ox.graph_from_place("Chennai, India", network_type="drive")
 print(f"Graph loaded: {len(G.nodes)} nodes, {len(G.edges)} edges")
+active_dispatches = {}
 
 
 # ──────────────────────────────────────────────────────────────
@@ -108,22 +112,28 @@ async def dispatch(incident_id: int):
     # 3. Map ambulance and incident coordinates to graph nodes
     source_node = ox.distance.nearest_nodes(G, amb["lng"], amb["lat"])
     target_node = ox.distance.nearest_nodes(G, incident["lng"], incident["lat"])
+    print(f"DEBUG: source_node={source_node}, target_node={target_node}")
 
-    # 4. Check Redis cache first
-    cached = cache_get(source_node, target_node)
-    if cached is not None:
-        route = cached
-        # Approximate distance from cached route — we lose the exact meters
-        # unless we also cache the distance. For now, recompute on miss only.
-        distance_m = 0.0  # placeholder; fine for now
+    # Trivial case: ambulance and incident map to the same graph node
+    if source_node == target_node:
+        route = [[amb["lat"], amb["lng"]], [incident["lat"], incident["lng"]]]
+        distance_m = 0.0
     else:
-        # 5. Cache miss — run Dijkstra
-        route, distance_m = dijkstra(G, source_node, target_node)
-        # Convert tuples to lists for JSON
-        route = [[lat, lng] for (lat, lng) in route]
-        cache_set(source_node, target_node, route)
-
+        cached = cache_get(source_node, target_node)
+        if cached is not None:
+            route = cached["coords"]
+            distance_m = cached["distance_m"]
+        else:
+            route, distance_m = dijkstra(G, source_node, target_node)
+            route = [[lat, lng] for (lat, lng) in route]
+            cache_set(source_node, target_node, route, distance_m)
     # 6. Update DB — link ambulance to incident, flip statuses
+    # Register for simulation — the background task will walk the ambulance along this route
+    active_dispatches[amb["id"]] = {
+        "route": route,
+        "progress": 0,          # index into route
+        "incident_id": incident_id,
+    }
     assign_ambulance_to_incident(incident_id, amb["id"])
 
     return DispatchResponse(
@@ -141,3 +151,60 @@ async def mark_available(amb_id: int):
     """Mark an ambulance back as available (e.g. after dropoff)."""
     update_ambulance_status(amb_id, "available")
     return {"ambulance_id": amb_id, "status": "available"}
+
+# ──────────────────────────────────────────────────────────────
+# Ambulance movement simulation
+# ──────────────────────────────────────────────────────────────
+
+async def simulate_ambulance_movement():
+    """
+    Background task: every 2 seconds, advance each active ambulance
+    one step along its route in the database.
+    """
+    from db import update_ambulance_location  # import here to avoid circular issues
+
+    while True:
+        await asyncio.sleep(2)
+
+        # Iterate over a copy because we may mutate the dict during the loop
+        for amb_id, info in list(active_dispatches.items()):
+            route = info["route"]
+            progress = info["progress"]
+
+            # Done — reached the incident
+            if progress >= len(route) - 1:
+                # Mark ambulance available again and clear the dispatch
+                update_ambulance_status(amb_id, "available")
+                del active_dispatches[amb_id]
+                continue
+
+            # Advance one waypoint along the route
+            progress += 1
+            lat, lng = route[progress]
+            update_ambulance_location(amb_id, lat, lng)
+            active_dispatches[amb_id]["progress"] = progress
+
+
+@app.on_event("startup")
+async def start_simulation():
+    """Kick off the simulation loop when the server starts."""
+    asyncio.create_task(simulate_ambulance_movement())
+
+
+# ──────────────────────────────────────────────────────────────
+# WebSocket endpoint — pushes ambulance positions every 2 seconds
+# ──────────────────────────────────────────────────────────────
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            ambulances = get_all_ambulances()
+            # Convert to plain list of dicts for JSON — RealDictRow is already dict-like
+            payload = json.dumps([dict(a) for a in ambulances])
+            await websocket.send_text(payload)
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        # Browser closed the connection — nothing to clean up, just exit
+        pass

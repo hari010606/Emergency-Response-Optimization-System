@@ -7,25 +7,17 @@ r = redis.Redis(host="localhost", port=6379, decode_responses=True)
 
 
 def get_route(source_node, target_node):
-    """
-    Try to fetch a cached route between two graph nodes.
-    Returns the list of [lat, lng] pairs, or None if not cached.
-    """
     key = f"route:{source_node}:{target_node}"
     cached = r.get(key)
     if cached is None:
         return None
-    return json.loads(cached)
+    return json.loads(cached)  # now returns a dict: {"coords": [...], "distance_m": ...}
 
 
-def set_route(source_node, target_node, coords, ttl=600):
-    """
-    Store a route in the cache with a 10-minute TTL (default).
-    coords is a list of (lat, lng) pairs.
-    """
+def set_route(source_node, target_node, coords, distance_m, ttl=600):
     key = f"route:{source_node}:{target_node}"
-    r.setex(key, ttl, json.dumps(coords))
-
+    payload = json.dumps({"coords": coords, "distance_m": distance_m})
+    r.setex(key, ttl, payload)
 
 def clear_all_routes():
     """Delete every route key — useful during development."""
