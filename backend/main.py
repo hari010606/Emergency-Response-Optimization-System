@@ -16,6 +16,8 @@ from db import (
     assign_ambulance_to_incident,
     get_active_incidents,
     update_ambulance_status,
+    reset_active_dispatches,
+    reset_ambulance_positions,
 )
 
 
@@ -187,7 +189,9 @@ async def simulate_ambulance_movement():
 
 @app.on_event("startup")
 async def start_simulation():
-    """Kick off the simulation loop when the server starts."""
+    reset_active_dispatches()
+    reset_ambulance_positions()
+    print("Reset ambulances to seed state (status + position)")
     asyncio.create_task(simulate_ambulance_movement())
 
 

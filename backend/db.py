@@ -113,6 +113,53 @@ def get_active_incidents():
     conn.close()
     return rows
 
+def reset_active_dispatches():
+    """
+    Full reset to seed state:
+    - All ambulances: status='available' + restored to original seed coordinates
+    - All incidents: status='resolved'
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # Reset statuses
+    cur.execute("UPDATE ambulances SET status = 'available'")
+    cur.execute("UPDATE incidents SET status = 'resolved'")
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# Original seed coordinates (keep in sync with your SQL seed data)
+SEED_POSITIONS = [
+    (1, 13.0827, 80.2707), (2, 13.0604, 80.2496), (3, 13.0418, 80.2341),
+    (4, 13.0732, 80.2609), (5, 13.0878, 80.2785), (6, 13.1143, 80.2899),
+    (7, 13.1231, 80.2156), (8, 13.1067, 80.2847), (9, 13.1389, 80.2619),
+    (10, 13.1604, 80.3012), (11, 13.0067, 80.2206), (12, 13.0012, 80.2565),
+    (13, 12.9801, 80.2209), (14, 12.9516, 80.1434), (15, 12.9249, 80.1000),
+    (16, 12.9010, 80.2279), (17, 13.0499, 80.2824), (18, 13.0878, 80.2925),
+    (19, 13.0389, 80.2619), (20, 12.9698, 80.2494), (21, 13.0732, 80.1895),
+    (22, 13.0495, 80.1821), (23, 13.0846, 80.1765), (24, 13.0379, 80.1565),
+    (25, 13.0923, 80.1715), (26, 13.0850, 80.2101), (27, 13.0948, 80.2294),
+    (28, 13.1185, 80.2043), (29, 12.8996, 80.2209), (30, 13.1982, 80.3192),
+    (31, 12.8340, 80.0437), (32, 13.0098, 80.0585), (33, 13.1760, 80.1370),
+    (34, 13.0143, 80.1761), (35, 12.9467, 80.1879),
+]
+
+
+def reset_ambulance_positions():
+    """Restore all ambulances to their original seed coordinates."""
+    conn = get_connection()
+    cur = conn.cursor()
+    for amb_id, lat, lng in SEED_POSITIONS:
+        cur.execute(
+            "UPDATE ambulances SET lat = %s, lng = %s WHERE id = %s",
+            (lat, lng, amb_id),
+        )
+    conn.commit()
+    cur.close()
+    conn.close()
+
 
 # Quick self-test — runs only if you execute `python db.py` directly.
 if __name__ == "__main__":
