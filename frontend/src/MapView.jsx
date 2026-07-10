@@ -1,6 +1,6 @@
 import { MapContainer, TileLayer, Marker, Polyline, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const ambIcon = (status) =>
   L.divIcon({
@@ -19,27 +19,21 @@ const incidentIcon = L.divIcon({
 
 function ClickHandler({ onMapClick }) {
   useMapEvents({
-    click: (e) => {
-      onMapClick(e.latlng.lat, e.latlng.lng);
-    },
+    click: (e) => onMapClick(e.latlng.lat, e.latlng.lng),
   });
   return null;
 }
 
-// Forces Leaflet to recalculate its container size after mount.
-// Fixes the "tiles scattered" bug caused by flex layout settling late.
 function SizeInvalidator() {
   const map = useMap();
   useEffect(() => {
-    const timers = [
-      setTimeout(() => map.invalidateSize(), 0),
-      setTimeout(() => map.invalidateSize(), 100),
-      setTimeout(() => map.invalidateSize(), 500),
-    ];
+    // Invalidate once immediately, then again after a short delay
+    map.invalidateSize();
+    const t = setTimeout(() => map.invalidateSize(), 200);
     const onResize = () => map.invalidateSize();
     window.addEventListener("resize", onResize);
     return () => {
-      timers.forEach(clearTimeout);
+      clearTimeout(t);
       window.removeEventListener("resize", onResize);
     };
   }, [map]);
@@ -58,36 +52,63 @@ function RouteFitter({ route }) {
 }
 
 export default function MapView({ ambulances, incidents, route, onMapClick, pendingIncident }) {
+  const containerRef = useRef(null);
+  // Don't render the map until the container has a real measured size
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          setReady(true);
+          observer.disconnect(); // only need to fire once
+        }
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <MapContainer
-      center={[13.06, 80.24]}
-      zoom={12}
-      style={{ height: "100%", width: "100%" }}
-      zoomControl={false}
-    >
-      <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attribution='&copy; OpenStreetMap'
-      />
-      <SizeInvalidator />
-      <RouteFitter route={route} />
-      <ClickHandler onMapClick={onMapClick} />
+    <div ref={containerRef} style={{ height: "100%", width: "100%", position: "relative" }}>
+      {ready && (
+        <MapContainer
+          center={[13.06, 80.24]}
+          zoom={12}
+          style={{ height: "100%", width: "100%", position: "absolute", inset: 0 }}
+          zoomControl={false}
+        >
+          <TileLayer
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution="&copy; OpenStreetMap"
+          />
+          <SizeInvalidator />
+          <RouteFitter route={route} />
+          <ClickHandler onMapClick={onMapClick} />
 
-      {ambulances.map((a) => (
-        <Marker key={a.id} position={[a.lat, a.lng]} icon={ambIcon(a.status)} />
-      ))}
+          {ambulances.map((a) => (
+            <Marker key={a.id} position={[a.lat, a.lng]} icon={ambIcon(a.status)} />
+          ))}
 
-      {incidents.map((i) => (
-        <Marker key={i.id} position={[i.lat, i.lng]} icon={incidentIcon} />
-      ))}
+          {incidents.map((i) => (
+            <Marker key={i.id} position={[i.lat, i.lng]} icon={incidentIcon} />
+          ))}
 
-      {pendingIncident && (
-        <Marker position={[pendingIncident.lat, pendingIncident.lng]} icon={incidentIcon} />
+          {pendingIncident && (
+            <Marker position={[pendingIncident.lat, pendingIncident.lng]} icon={incidentIcon} />
+          )}
+
+          {route && route.length > 1 && (
+            <Polyline
+              positions={route}
+              pathOptions={{ color: "#4f8cff", weight: 4, opacity: 0.9 }}
+            />
+          )}
+        </MapContainer>
       )}
-
-      {route && route.length > 1 && (
-        <Polyline positions={route} pathOptions={{ color: "#4f8cff", weight: 4, opacity: 0.9 }} />
-      )}
-    </MapContainer>
+    </div>
   );
 }

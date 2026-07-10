@@ -303,3 +303,9 @@ button.primary:hover:not(:disabled) {
 ::-webkit-scrollbar-thumb:hover {
   background: #2a3344;
 }
+.map-pane > div {
+  height: 100%;
+  width: 100%;
+  position: absolute;
+  inset: 0;
+}
